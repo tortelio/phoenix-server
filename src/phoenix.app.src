@@ -1,0 +1,16 @@
+{application, phoenix, [
+  {description, "Phoenix server"},
+  {vsn, "0.0.0"},
+  {modules, [phoenix_app, phoenix_sup]},
+  {registered, [phoenix, phoenix_sup]},
+  {applications, [
+    kernel,
+    stdlib,
+    cowlib,
+    ranch,
+    cowboy,
+    mnesia
+  ]},
+  {mod, {phoenix_app, []}},
+  {env, []}
+]}.
