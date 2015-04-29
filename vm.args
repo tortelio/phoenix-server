@@ -1,6 +1,2 @@
-## Name of the node$
--sname survey@localhost$
-$
-## Cookie for distributed erlang$
--setcookie UdfUnKQxzc52SWzd5oAhwJ5oc1Yc1J$
-
+## Name of the node
+-sname phoenix@localhost

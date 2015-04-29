@@ -72,3 +72,31 @@ records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Don
     [{[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]}];
 records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, Owner}|T]) ->
     [{[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]}|records_to_ejson(T)].
+
+%%------------------------------------
+%%               Test
+%%------------------------------------
+
+-ifdef(TEST).
+-define(TEST_PORT, 18080).
+int_to_bin(X) -> list_to_binary(integer_to_list(X)).
+create_list(N) -> create_list(N, []).
+create_list(0, Acc) -> Acc;
+create_list(N, Acc) ->
+    Item = #phoenix_item{id = erlang:iolist_to_binary([<<"id-">>, int_to_bin(N)]),
+                         details = #phoenix_item_details{description = erlang:iolist_to_binary([<<"desc-">>, int_to_bin(N)]),
+                                                         done = false},
+                         owner = erlang:iolist_to_binary([<<"Tester-">>, int_to_bin(N)])},
+    create_list(N-1, [Item|Acc]).
+records_to_ejson_test() ->
+    Records = create_list(3),
+    ?assert([{phoenix_item, <<"id-1">>, {phoenix_item_details, <<"desc-1">>, false}, <<"Tester-1">>},
+             {phoenix_item, <<"id-2">>, {phoenix_item_details, <<"desc-2">>, false}, <<"Tester-2">>},
+             {phoenix_item, <<"id-3">>, {phoenix_item_details, <<"desc-3">>, false}, <<"Tester-3">>}] == Records),
+
+    Ejson = records_to_ejson(Records),
+    ?assert([{[{<<"id">>, <<"id-1">>}, {<<"description">>, <<"desc-1">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-1">>}]},
+             {[{<<"id">>, <<"id-2">>}, {<<"description">>, <<"desc-2">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-2">>}]},
+             {[{<<"id">>, <<"id-3">>}, {<<"description">>, <<"desc-3">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-3">>}]}] == Ejson).
+
+-endif.

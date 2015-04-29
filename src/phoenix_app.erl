@@ -1,4 +1,5 @@
 -module(phoenix_app).
+-include("phoenix_internal.hrl").
 -behaviour(application).
 
 -define(APPLICATION_NAME, phoenix).
@@ -6,8 +7,9 @@
 %% API.
 -export([start/2, stop/1]).
 
--export([data_dir/0]).
-%% Implementation
+%%------------------------------------
+%%         Implementation
+%%------------------------------------
 
 -spec start(_, _) -> {ok, pid()}.
 start(_Type, _Args) ->
@@ -21,9 +23,9 @@ stop(_State) ->
     stop_cowboy(),
     phoenix_db:stop().
 
-data_dir() ->
-    {ok, DirSpec} = application:get_env(phoenix, data_dir),
-    expand_path(DirSpec).
+%%------------------------------------
+%%             Private
+%%------------------------------------
 
 % Starts cowboy
 start_cowboy(Port) ->
@@ -41,7 +43,26 @@ start_cowboy(Port) ->
 stop_cowboy() ->
     ok = cowboy:stop_listener(http).
 
-expand_path({priv_dir, RelativeDir}) when is_list(RelativeDir) ->
-    filename:join([code:priv_dir(phoenix), RelativeDir]);
-expand_path(Dir) when is_list(Dir) ->
-    filename:absname(Dir).
+%%------------------------------------
+%%               Test
+%%------------------------------------
+
+-ifdef(TEST).
+-define(TEST_PORT, 18080).
+
+%setup() ->
+%    ok = application:set_env(phoenix, port, ?TEST_PORT).
+%
+%start_test() ->
+%    setup(),
+%    {ok, _} = application:ensure_all_started(phoenix).
+%%    ?assertNot(undefined == whereis(phoenix_sup)).
+%%
+%%stop_test() ->
+%%    ok = application:stop(phoenix),
+%%    ?assert(undefined == whereis(phoenix_sup)).
+%
+%ok_test() ->
+%    [2, 1] == lists:reverse([1, 2]).
+%
+-endif.

@@ -1,4 +1,7 @@
-logs/*
-.*.swp
+/logs
+.*swp
 Mnesia*
-deps/*
+/deps
+/ebin
+**/*.beam
+.*
