@@ -5,8 +5,7 @@ main(_Args) ->
     ok = application:start(?MODULE).
 
 start() ->
-  {ok, _} = application:ensure_all_started(?MODULE),
-  ok.
+  application:ensure_all_started(?MODULE).
 
 stop() ->
   application:stop(?MODULE).

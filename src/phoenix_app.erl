@@ -35,8 +35,8 @@ start_cowboy(Port) ->
               {"/websocket", ws_handler, []}],
 
     Dispatch = cowboy_router:compile([{Host, Routes}]),
-    {ok, _} = cowboy:start_http(http, 100, [{port, Port}],
-                                [{env, [{dispatch, Dispatch}]} ]),
+    {ok, _} = cowboy:start_http(http, 100, [{port, Port}], [{env, [{dispatch, Dispatch}]} ]),
+
     io:format("~w started on ~p.~n", [?APPLICATION_NAME, Port]).
 
 % Stops cowboy
@@ -47,7 +47,7 @@ stop_cowboy() ->
 %%               Test
 %%------------------------------------
 
--ifdef(TEST).
+-ifdef(EUNIT).
 -define(TEST_PORT, 18080).
 
 %setup() ->

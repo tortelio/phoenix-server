@@ -23,10 +23,10 @@ terminate(_Reason, _Req, _State) ->
 % Login
 handle_json_message({<<"type">>, <<"login">>} = Type, [{<<"name">>, Name}]) ->
     case phoenix_user:find_by_user_name(Name) of
-        [{phoenix_user, UserId, UserName}] ->
+        [{phoenix_user, UserId, UserName, _}] ->
             ok;
         [] ->
-            {ok, {phoenix_user, UserId, UserName}} = phoenix_user:create(Name)
+            {ok, {UserId, UserName}} = phoenix_user:create(Name)
     end,
     jiffy:encode({[Type, {<<"user">>, {[{<<"name">>, UserName}, {<<"id">>, UserId}]}}]});
 
@@ -35,7 +35,7 @@ handle_json_message({<<"type">>, <<"login">>} = Type, [{<<"id">>, Id}]) ->
         [{phoenix_user, UserId, UserName}] ->
             jiffy:encode({[Type, {<<"user">>, {[{<<"name">>, UserName}, {<<"id">>, UserId}]}}]});
         [] ->
-            jiffy:encode({[Type, {<<"notFound">>, false}]})
+            jiffy:encode({[Type, {<<"notFound">>, true}]})
     end;
 
 % Get all
@@ -49,7 +49,7 @@ handle_json_message({<<"type">>, <<"getAll">>} = Type, [{<<"id">>, UserId}]) ->
 
 % Create
 handle_json_message({<<"type">>, <<"create">>} = Type, [{<<"item">>, {[{<<"description">>, Description}, {<<"owner">>, Owner}]}}]) ->
-    {ok, {phoenix_item, ItemId, {phoenix_item_details, Description, Done}, Owner}} = phoenix_item:create(Description, Owner),
+    {ok, {phoenix_item, ItemId, {phoenix_item_details, Description, Done}, _Clock, Owner}} = phoenix_item:create(Description, Owner),
     Item = {[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]},
     jiffy:encode({[Type, {<<"item">>, Item}]});
 
@@ -68,16 +68,16 @@ handle_json_message(Type, Arguments) ->
 % private
 
 
-records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, Owner}|[]]) ->
+records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, _Clock, Owner}|[]]) ->
     [{[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]}];
-records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, Owner}|T]) ->
+records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, _Clock, Owner}|T]) ->
     [{[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]}|records_to_ejson(T)].
 
 %%------------------------------------
 %%               Test
 %%------------------------------------
 
--ifdef(TEST).
+-ifdef(EUNIT).
 -define(TEST_PORT, 18080).
 int_to_bin(X) -> list_to_binary(integer_to_list(X)).
 create_list(N) -> create_list(N, []).
@@ -86,13 +86,15 @@ create_list(N, Acc) ->
     Item = #phoenix_item{id = erlang:iolist_to_binary([<<"id-">>, int_to_bin(N)]),
                          details = #phoenix_item_details{description = erlang:iolist_to_binary([<<"desc-">>, int_to_bin(N)]),
                                                          done = false},
+                         clock = itc:seed(),
                          owner = erlang:iolist_to_binary([<<"Tester-">>, int_to_bin(N)])},
     create_list(N-1, [Item|Acc]).
 records_to_ejson_test() ->
     Records = create_list(3),
-    ?assert([{phoenix_item, <<"id-1">>, {phoenix_item_details, <<"desc-1">>, false}, <<"Tester-1">>},
-             {phoenix_item, <<"id-2">>, {phoenix_item_details, <<"desc-2">>, false}, <<"Tester-2">>},
-             {phoenix_item, <<"id-3">>, {phoenix_item_details, <<"desc-3">>, false}, <<"Tester-3">>}] == Records),
+    io:format("rec : ~p~n", [Records]),
+    ?assert([{phoenix_item, <<"id-1">>, {phoenix_item_details, <<"desc-1">>, false}, {1,0}, <<"Tester-1">>},
+             {phoenix_item, <<"id-2">>, {phoenix_item_details, <<"desc-2">>, false}, {1,0}, <<"Tester-2">>},
+             {phoenix_item, <<"id-3">>, {phoenix_item_details, <<"desc-3">>, false}, {1,0}, <<"Tester-3">>}] == Records),
 
     Ejson = records_to_ejson(Records),
     ?assert([{[{<<"id">>, <<"id-1">>}, {<<"description">>, <<"desc-1">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-1">>}]},

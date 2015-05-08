@@ -6,21 +6,20 @@
 
 -export([migrate/2]).
 
--define(DESCRIPTION_NAME, "DESCRIPTION").
-
 create(UserName) when is_binary(UserName) ->
     User = create_user(UserName),
     Log = #phoenix_user_log{id = ?GENERATE_TOKEN,
                             user_id = User#phoenix_user.id,
                             action = register,
-                            time = now()},
+                            time = now(),
+                            clock = User#phoenix_user.clock},
     Fun = fun() ->
         ok = mnesia:write(phoenix_users, User, write),
         ok = mnesia:write(phoenix_users_log, Log, write)
     end,
     mnesia:activity(transaction, Fun),
 
-    {ok, User}.
+    {ok, {User#phoenix_user.id, User#phoenix_user.name}}.
 
 find_by_user_name(UserName) ->
     Fun = fun() ->
@@ -56,7 +55,7 @@ migrate(up, Nodes) ->
 
 create_user(UserName) ->
     UserId = ?GENERATE_TOKEN,
-    #phoenix_user{id = UserId, name = UserName}.
+    #phoenix_user{id = UserId, name = UserName, clock = itc:seed()}.
 
 %%------------------------------------
 %%               Test
@@ -67,6 +66,7 @@ create_user_test() ->
     UserName = <<"Tester">>,
     User = create_user(UserName),
     ?assert(is_binary(User#phoenix_user.id)),
-    ?assert(User#phoenix_user.name == UserName).
+    ?assert(User#phoenix_user.name == UserName),
+    ?assert(User#phoenix_user.clock == {1,0}).
 
 -endif.

@@ -1,7 +1,7 @@
 -module(green_SUITE).
 -include_lib("common_test/include/ct.hrl").
 
--define(TEST_PORT, 18080).
+-define(TEST_PORT, 8080).
 %% Test server callbacks
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 
@@ -15,8 +15,8 @@ all() ->
 init_per_suite(Config) ->
     ok = application:set_env(phoenix, port, ?TEST_PORT),
     phoenix_db:bootstrap(i_know_what_i_am_doing),
-    ok = phoenix:start(),
-    {ok, _} = application:ensure_all_started(websocket_client),
+    {ok, _} = phoenix:start(),
+    {ok, _} = application:ensure_all_started(gun),
     [{phoenix_url, "http://127.0.0.1:" ++ integer_to_list(?TEST_PORT) ++ "/"} | Config].
 
 end_per_suite(_Config) ->
@@ -26,9 +26,5 @@ end_per_suite(_Config) ->
 full_process() ->
     [].
 full_process(_Config) ->
-    Url = "ws://localhost:" ++ integer_to_list(?TEST_PORT) ++ "/websocket",
-    ws_test_client:start_link(Url),
-
-    UserName = <<"Tester">>,
-    ws_test_client:login(UserName),
+    {ok, _ConnPid} = gun:open("127.0.0.1", ?TEST_PORT),
     ok.
