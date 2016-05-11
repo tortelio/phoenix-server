@@ -12,7 +12,7 @@
 -record(phoenix_item, {id :: uuid(), details :: #phoenix_item_details{}, clock, owner :: uuid()}).
 -record(phoenix_item_log, {id :: uuid(), item_id :: uuid(), action, time, clock}).
 -record(item_create, {item}).
--record(item_update, {field, value}).
+-record(item_update, {details}).
 
 -define(GENERATE_TOKEN, list_to_binary(uuid:to_string(uuid:uuid5(uuid:uuid4(), "phoenix")))).
 

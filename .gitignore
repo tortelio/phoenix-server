@@ -5,3 +5,4 @@ Mnesia*
 /ebin
 **/*.beam
 .*
+_build

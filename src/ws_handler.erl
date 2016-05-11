@@ -8,10 +8,14 @@
 init(Req, Opts) ->
     {cowboy_websocket, Req, Opts}.
 
-websocket_handle({text, Message}, Req, State) ->
-    {[Type|Arguments]} = jiffy:decode(Message),
-     Reply = handle_json_message(Type, Arguments),
-    {reply, {text, Reply}, Req, State};
+websocket_handle({text, RawMessage}, Req, State) ->
+    Reply = case decode_msg(RawMessage) of
+                invalid_type -> invalid_type;
+                {Type, Value} -> handle_message(Type, Value)
+            end,
+
+    {reply, {text, encode_msg(Reply)}, Req, State};
+
 websocket_handle(_Data, Req, State) ->
     {ok, Req, State}.
 
@@ -20,85 +24,111 @@ websocket_info(_Info, Req, State) ->
 
 terminate(_Reason, _Req, _State) ->
     ok.
-% Login
-handle_json_message({<<"type">>, <<"login">>} = Type, [{<<"name">>, Name}]) ->
-    case phoenix_user:find_by_user_name(Name) of
-        [{phoenix_user, UserId, UserName, _}] ->
-            ok;
-        [] ->
-            {ok, {UserId, UserName}} = phoenix_user:create(Name)
-    end,
-    jiffy:encode({[Type, {<<"user">>, {[{<<"name">>, UserName}, {<<"id">>, UserId}]}}]});
 
-handle_json_message({<<"type">>, <<"login">>} = Type, [{<<"id">>, Id}]) ->
-    case phoenix_user:find_by_user_id(Id) of
-        [{phoenix_user, UserId, UserName}] ->
-            jiffy:encode({[Type, {<<"user">>, {[{<<"name">>, UserName}, {<<"id">>, UserId}]}}]});
-        [] ->
-            jiffy:encode({[Type, {<<"notFound">>, true}]})
+% Login
+
+%% TODO now this login will register if does not exist
+handle_message(login, {[{<<"name">>, Name}]}) ->
+    case phoenix_user:find_by_name(Name) of
+        not_found ->
+            {ok, User} = phoenix_user:create(Name);
+        User ->
+            User
+    end,
+    {login, User};
+
+handle_message(login, {[{<<"id">>, Id}]}) ->
+    case phoenix_user:find_by_id(Id) of
+        not_found ->
+            {login, error};
+        User ->
+            {login, User}
     end;
 
 % Get all
-handle_json_message({<<"type">>, <<"getAll">>} = Type, [{<<"id">>, UserId}]) ->
-    Records = phoenix_item:find_by_item_owner(UserId),
-    Items = case Records of
-        [] -> [];
-        _ -> records_to_ejson(Records)
-    end,
-    jiffy:encode({[Type, {<<"items">>, Items}]});
+handle_message(get_user_data, {[{<<"id">>, Id}]}) ->
+    case phoenix_user:find_by_id(Id) of
+        not_found ->
+            {get_user_data, not_found};
+        User ->
+            Items = phoenix_item:find_by_owner(User#phoenix_user.id),
+            {get_user_data, {User, Items}}
+    end;
 
 % Create
-handle_json_message({<<"type">>, <<"create">>} = Type, [{<<"item">>, {[{<<"description">>, Description}, {<<"owner">>, Owner}]}}]) ->
-    {ok, {phoenix_item, ItemId, {phoenix_item_details, Description, Done}, _Clock, Owner}} = phoenix_item:create(Description, Owner),
-    Item = {[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]},
-    jiffy:encode({[Type, {<<"item">>, Item}]});
+handle_message(add_item, {[{<<"details">>, {[{<<"description">>, Description},
+                                             {<<"done">>, Done}]},
+                           {<<"owner">>, Owner}}]}) ->
+    {ok, Item} = phoenix_item:create(#phoenix_item_details{description = Description,
+                                                           done = Done}, Owner),
+    {add_item, Item};
 
-% Set
-handle_json_message({<<"type">>, <<"set">>} = Type, [{<<"id">>, ItemId}, {<<"command">>, <<"switch">>}]) ->
-    {ok, Item}= phoenix_item:switch(ItemId),
-    jiffy:encode({[Type, {<<"item">>, Item}]});
+handle_message(update_item, {[{<<"id">>, Id},
+                              {<<"details">>, {[{<<"description">>, Description},
+                                                {<<"done">>, Done}]}},
+                              {<<"owner">>, Owner}]}) ->
+    {ok, Item} = phoenix_item:update(#phoenix_item{id = Id,
+                                                   details = #phoenix_item_details{description = Description,
+                                                                                   done = Done},
+                                                   owner = Owner}),
+    {update_item, Item};
 
 % Unhandled
-handle_json_message(Type, Arguments) ->
+handle_message(Type, Value) ->
     io:format("=======================================================~n"),
-    io:format("Unhandled request: ~n---------------~nType: ~p~nArguments: ~p~n", [Type, Arguments]),
+    io:format("Unhandled request: ~n---------------~nType: ~p~nValue: ~p~n", [Type, Value]),
     io:format("=======================================================~n"),
-    jiffy:encode({[Type]}).
+    unhandled.
 
 % private
 
+decode_msg(Msg) ->
+    case jiffy:decode(Msg) of
+        {[{<<"type">>, Type}, {<<"value">>, Value}]} ->
+            {list_to_atom(binary_to_list(Type)), Value};
+        _ ->
+            invalid_format
+    end.
 
-records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, _Clock, Owner}|[]]) ->
-    [{[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]}];
-records_to_ejson([{phoenix_item, ItemId, {phoenix_item_details, Description, Done}, _Clock, Owner}|T]) ->
-    [{[{<<"id">>, ItemId}, {<<"description">>, Description}, {<<"done">>, Done}, {<<"owner">>, Owner}]}|records_to_ejson(T)].
+encode_msg({Type, Value}) ->
+    jiffy:encode({[{<<"type">>, Type}, {<<"value">>, to_ejson(Value)}]});
+encode_msg(Type) ->
+    jiffy:encode({[{<<"type">>, Type}]}).
+
+to_ejson([]) -> [];
+to_ejson([X|T]) -> [to_ejson(X)|to_ejson(T)];
+to_ejson(X) when is_atom(X) -> X;
+%% TODO tuple -> record. is not correct
+to_ejson(X) when is_tuple(X) -> record_to_ejson(X).
+
+%% TODO this is not a simply record
+record_to_ejson({User, Items}) when is_record(User, phoenix_user) ->
+    {[{<<"id">>, User#phoenix_user.id},
+      {<<"name">>, User#phoenix_user.name},
+      {<<"items">>, to_ejson(Items)}]};
+record_to_ejson(User) when is_record(User, phoenix_user) ->
+    {[{<<"id">>, User#phoenix_user.id},
+      {<<"name">>, User#phoenix_user.name}]};
+record_to_ejson(Item) when is_record(Item, phoenix_item) ->
+    {[{<<"id">>, Item#phoenix_item.id},
+      {<<"details">>, to_ejson(Item#phoenix_item.details)},
+      {<<"owner">>, Item#phoenix_item.owner}]};
+record_to_ejson(Details) when is_record(Details, phoenix_item_details) ->
+    {[{<<"description">>, Details#phoenix_item_details.description},
+      {<<"done">>, Details#phoenix_item_details.done}]}.
+
 
 %%------------------------------------
 %%               Test
 %%------------------------------------
 
 -ifdef(EUNIT).
--define(TEST_PORT, 18080).
-int_to_bin(X) -> list_to_binary(integer_to_list(X)).
-create_list(N) -> create_list(N, []).
-create_list(0, Acc) -> Acc;
-create_list(N, Acc) ->
-    Item = #phoenix_item{id = erlang:iolist_to_binary([<<"id-">>, int_to_bin(N)]),
-                         details = #phoenix_item_details{description = erlang:iolist_to_binary([<<"desc-">>, int_to_bin(N)]),
-                                                         done = false},
-                         clock = itc:seed(),
-                         owner = erlang:iolist_to_binary([<<"Tester-">>, int_to_bin(N)])},
-    create_list(N-1, [Item|Acc]).
-records_to_ejson_test() ->
-    Records = create_list(3),
-    io:format("rec : ~p~n", [Records]),
-    ?assert([{phoenix_item, <<"id-1">>, {phoenix_item_details, <<"desc-1">>, false}, {1,0}, <<"Tester-1">>},
-             {phoenix_item, <<"id-2">>, {phoenix_item_details, <<"desc-2">>, false}, {1,0}, <<"Tester-2">>},
-             {phoenix_item, <<"id-3">>, {phoenix_item_details, <<"desc-3">>, false}, {1,0}, <<"Tester-3">>}] == Records),
 
-    Ejson = records_to_ejson(Records),
-    ?assert([{[{<<"id">>, <<"id-1">>}, {<<"description">>, <<"desc-1">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-1">>}]},
-             {[{<<"id">>, <<"id-2">>}, {<<"description">>, <<"desc-2">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-2">>}]},
-             {[{<<"id">>, <<"id-3">>}, {<<"description">>, <<"desc-3">>}, {<<"done">>, false}, {<<"owner">>, <<"Tester-3">>}]}] == Ejson).
+to_json_test() ->
+    ?assert(to_ejson([]) == []),
+    ?assert(to_ejson([atom]) == [atom]),
+    Id = ?GENERATE_TOKEN,
+    User = #phoenix_user{name = "Sample", id = Id},
+    ?assert(to_ejson(User) == {[{<<"id">>, Id}, {<<"name">>, "Sample"}]}).
 
 -endif.

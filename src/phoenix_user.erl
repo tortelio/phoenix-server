@@ -1,10 +1,12 @@
 -module(phoenix_user).
 -include("phoenix_internal.hrl").
 
--export([create/1, find_by_user_name/1, find_by_user_id/1]).
+-export([create/1, find_by_name/1, find_by_id/1]).
 -export([all/0]).
 
 -export([migrate/2]).
+
+
 
 create(UserName) when is_binary(UserName) ->
     User = create_user(UserName),
@@ -19,19 +21,25 @@ create(UserName) when is_binary(UserName) ->
     end,
     mnesia:activity(transaction, Fun),
 
-    {ok, {User#phoenix_user.id, User#phoenix_user.name}}.
+    {ok, User}.
 
-find_by_user_name(UserName) ->
-    Fun = fun() ->
-        mnesia:match_object(phoenix_users, #phoenix_user{_ = '_', name = UserName}, read)
-    end,
-    mnesia:activity(transaction, Fun).
+single_answer([Result|_Rest]) -> Result;
+single_answer([]) -> not_found.
 
-find_by_user_id(UserId) ->
+find_by_name(Name) -> find_one_by(name, Name).
+
+find_by_id(Id) -> find_one_by(id, Id).
+
+find_one_by(Key, Value)->
+    Filter = case Key of
+                 name -> #phoenix_user{_ = '_', name = Value};
+                 id -> #phoenix_user{_ = '_', id = Value}
+             end,
     Fun = fun() ->
-        mnesia:match_object(phoenix_users, #phoenix_user{_ = '_', id = UserId}, read)
+        mnesia:match_object(phoenix_users, Filter, read)
     end,
-    mnesia:activity(transaction, Fun).
+    single_answer(mnesia:activity(transaction, Fun)).
+
 
 all() ->
     Fun = fun() ->
