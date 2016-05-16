@@ -1,0 +1,9 @@
+Erlang/OTP 18 + rebar3
+
+make deps
+make console
+
+ensure about priv contains index.html and assets/ from phoenix_client
+
+in console:
+  phoenix_db:bootstrap(i_know_what_i_am_doing).

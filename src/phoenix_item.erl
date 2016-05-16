@@ -1,12 +1,12 @@
 -module(phoenix_item).
 -include("phoenix_internal.hrl").
 
--export([create/2, find_by_owner/1, get_all/0, update/1]).
+-export([create/2, find_by_id/1, find_by_owner/1, get_all/0, update/1, delete/1]).
 
 -export([migrate/2]).
 
 create(Details, Owner) ->
-    [User] = mnesia:activity(transaction, fun() -> mnesia:read(phoenix_users, Owner, read) end),
+    User = phoenix_user:find_by_id(Owner),
     UserClock = itc:event(User#phoenix_user.clock),
     ItemSeed = itc:seed(),
     Now = now(),
@@ -36,8 +36,15 @@ create(Details, Owner) ->
 
     {ok, Item}.
 
-find_by() -> find(#phoenix_item{_ = '_'}).
-find_by(owner, Owner) -> find(#phoenix_item{owner = Owner, _ = '_'}).
+find_by() ->
+    find(#phoenix_item{_ = '_'}).
+
+find_by(owner, Owner) ->
+    find(#phoenix_item{owner = Owner, _ = '_'});
+
+find_by(id, Id) ->
+    find(#phoenix_item{id = Id, _ = '_'}).
+
 find(Filter) ->
     Fun = fun() ->
         mnesia:match_object(phoenix_items, Filter, read)
@@ -45,6 +52,7 @@ find(Filter) ->
     mnesia:activity(transaction, Fun).
 
 find_by_owner(Owner) -> find_by(owner, Owner).
+find_by_id(Id) -> find_by(id, Id).
 
 get_all() -> find_by().
 
@@ -70,12 +78,26 @@ update_item(Item, Item2) ->
 
 update(Item) ->
     Fun = fun() ->
-        [Item2] = mnesia:match_object(phoenix_items, #phoenix_item{id = Item#phoenix_item.id, _ = '_'}, read),
-        {UpdatedItem, Log} = update_with_log(Item2, Item),
-        mnesia:write(phoenix_items, UpdatedItem, write),
-        mnesia:write(phoenix_items_log, Log, write),
-        {ok, UpdatedItem}
-    end,
+                  [Item2] = mnesia:match_object(phoenix_items, #phoenix_item{id = Item#phoenix_item.id, _ = '_'}, read),
+                  {UpdatedItem, Log} = update_with_log(Item2, Item),
+                  mnesia:write(phoenix_items, UpdatedItem, write),
+                  mnesia:write(phoenix_items_log, Log, write),
+                  {ok, UpdatedItem}
+          end,
+    mnesia:activity(transaction, Fun).
+
+delete(ItemId) ->
+    Fun = fun() ->
+                  [Item] = find_by_id(ItemId),
+                  mnesia:delete_object(phoenix_items, Item, write),
+                  Log = #phoenix_item_log{id = ?GENERATE_TOKEN,
+                                          item_id = ItemId,
+                                          action = delete,
+                                          time = now(),
+                                          clock = Item#phoenix_item.clock},
+                  mnesia:write(phoenix_items_log, Log, write),
+                  ItemId
+          end,
     mnesia:activity(transaction, Fun).
 
 migrate(up, Nodes) ->

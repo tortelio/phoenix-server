@@ -1,15 +1,24 @@
 -module(phoenix_user).
 -include("phoenix_internal.hrl").
 
--export([create/1, find_by_name/1, find_by_id/1]).
+-export([sign_up/2,
+         log_in/2,
+         find_by_name/1, find_by_id/1]).
+
 -export([all/0]).
 
 -export([migrate/2]).
 
+sign_up(Name, Password) ->
+    case phoenix_user:find_by_name(Name) of
+        not_found ->
+            {ok, _UserId} = create(Name, Password);
+        User when is_record(User, phoenix_user) ->
+            already_registered
+    end.
 
-
-create(UserName) when is_binary(UserName) ->
-    User = create_user(UserName),
+create(UserName, Password) ->
+    User = create_user(UserName, Password),
     Log = #phoenix_user_log{id = ?GENERATE_TOKEN,
                             user_id = User#phoenix_user.id,
                             action = register,
@@ -21,7 +30,22 @@ create(UserName) when is_binary(UserName) ->
     end,
     mnesia:activity(transaction, Fun),
 
-    {ok, User}.
+    {ok, User#phoenix_user.id}.
+
+log_in(Name, Password) ->
+    Result = find_by_name(Name),
+    io:format("~p~n", [Result]),
+    case Result of
+        not_found ->
+            not_registered;
+        User when is_record(User, phoenix_user)->
+            case erlpass:match(Password, User#phoenix_user.password) of
+                true ->
+                    {ok, User#phoenix_user.id};
+                _ ->
+                    bad_password
+            end
+    end.
 
 single_answer([Result|_Rest]) -> Result;
 single_answer([]) -> not_found.
@@ -61,9 +85,10 @@ migrate(up, Nodes) ->
                          {index, [#phoenix_user_log.action]},
                          {disc_copies, Nodes}]).
 
-create_user(UserName) ->
+create_user(UserName, Password) ->
     UserId = ?GENERATE_TOKEN,
-    #phoenix_user{id = UserId, name = UserName, clock = itc:seed()}.
+    PasswordHash = erlpass:hash(Password),
+    #phoenix_user{id = UserId, name = UserName, password = PasswordHash, clock = itc:seed()}.
 
 %%------------------------------------
 %%               Test

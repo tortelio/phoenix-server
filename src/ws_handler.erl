@@ -27,20 +27,28 @@ terminate(_Reason, _Req, _State) ->
 
 % Login
 
-%% TODO now this login will register if does not exist
-handle_message(login, {[{<<"name">>, Name}]}) ->
-    case phoenix_user:find_by_name(Name) of
-        not_found ->
-            {ok, User} = phoenix_user:create(Name);
-        User ->
-            User
-    end,
-    {login, User};
+%% now this login will register if does not exist
+handle_message(sign_up, {[{<<"name">>, Name}, {<<"password">>, Password}]}) ->
+    case phoenix_user:sign_up(Name, Password) of
+        already_registered ->
+            {sign_up, already_registered};
+        {ok, UserId} ->
+            {sign_up, UserId}
+    end;
 
-handle_message(login, {[{<<"id">>, Id}]}) ->
+%% case should use for logging
+handle_message(log_in, {[{<<"name">>, Name}, {<<"password">>, Password}]}) ->
+    case phoenix_user:log_in(Name, Password) of
+        {ok, UserId} ->
+            {log_in, UserId};
+        Error ->
+            {log_in, Error}
+    end;
+
+handle_message(log_in, {[{<<"id">>, Id}]}) ->
     case phoenix_user:find_by_id(Id) of
         not_found ->
-            {login, error};
+            {login, not_registered};
         User ->
             {login, User}
     end;
@@ -56,11 +64,11 @@ handle_message(get_user_data, {[{<<"id">>, Id}]}) ->
     end;
 
 % Create
-handle_message(add_item, {[{<<"details">>, {[{<<"description">>, Description},
-                                             {<<"done">>, Done}]},
-                           {<<"owner">>, Owner}}]}) ->
+handle_message(add_item, {[{<<"id">>, UserId},
+                           {<<"details">>, {[{<<"description">>, Description},
+                                             {<<"done">>, Done}]}}]}) ->
     {ok, Item} = phoenix_item:create(#phoenix_item_details{description = Description,
-                                                           done = Done}, Owner),
+                                                           done = Done}, UserId),
     {add_item, Item};
 
 handle_message(update_item, {[{<<"id">>, Id},
@@ -72,6 +80,10 @@ handle_message(update_item, {[{<<"id">>, Id},
                                                                                    done = Done},
                                                    owner = Owner}),
     {update_item, Item};
+
+handle_message(delete_item, Id) ->
+    Id = phoenix_item:delete(Id),
+    {delete_item, Id};
 
 % Unhandled
 handle_message(Type, Value) ->
@@ -95,11 +107,13 @@ encode_msg({Type, Value}) ->
 encode_msg(Type) ->
     jiffy:encode({[{<<"type">>, Type}]}).
 
-to_ejson([]) -> [];
+to_ejson([X]) -> [to_ejson(X)];
 to_ejson([X|T]) -> [to_ejson(X)|to_ejson(T)];
-to_ejson(X) when is_atom(X) -> X;
 %% TODO tuple -> record. is not correct
-to_ejson(X) when is_tuple(X) -> record_to_ejson(X).
+to_ejson(X) when is_tuple(X) -> record_to_ejson(X);
+%% TODO
+to_ejson(X) when is_atom(X) -> X;
+to_ejson(X) -> X.
 
 %% TODO this is not a simply record
 record_to_ejson({User, Items}) when is_record(User, phoenix_user) ->

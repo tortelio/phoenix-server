@@ -9,7 +9,8 @@
     cowlib,
     ranch,
     cowboy,
-    mnesia
+    mnesia,
+    bcrypt
   ]},
   {mod, {phoenix_app, []}},
   {env, []}

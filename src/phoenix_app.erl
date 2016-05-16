@@ -35,7 +35,7 @@ start_cowboy(Port) ->
               {"/websocket", ws_handler, []}],
 
     Dispatch = cowboy_router:compile([{Host, Routes}]),
-    {ok, _} = cowboy:start_http(http, 100, [{port, Port}], [{env, [{dispatch, Dispatch}]} ]),
+    {ok, _Pid} = cowboy:start_http(http, 100, [{port, Port}], [{env, [{dispatch, Dispatch}]} ]),
 
     io:format("~w started on ~p.~n", [?APPLICATION_NAME, Port]).
 

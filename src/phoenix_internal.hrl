@@ -4,7 +4,7 @@
 
 -type uuid() :: binary().
 
--record(phoenix_user, {id :: uuid(), name :: binary(), clock}).
+-record(phoenix_user, {id :: uuid(), name :: binary(), password :: binary(), clock}).
 -record(phoenix_user_log, {id :: uuid(), user_id :: uuid(), action, time, clock}).
 -record(user_add_item, {item_id :: uuid()}).
 
