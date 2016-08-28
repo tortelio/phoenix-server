@@ -3,38 +3,41 @@
 
 -export([sign_up/2,
          log_in/2,
-         find_by_name/1, find_by_id/1]).
+         find_user_by/2, find_users_by/2]).
 
 -export([all/0]).
 
 -export([migrate/2]).
 
 sign_up(Name, Password) ->
-    case phoenix_user:find_by_name(Name) of
+    case find_user_by(name, Name) of
         not_found ->
             {ok, _UserId} = create(Name, Password);
         User when is_record(User, phoenix_user) ->
             already_registered
     end.
 
+create_user_log(Action, User) ->
+    #phoenix_user_log{id = ?GENERATE_TOKEN,
+                      user_id = User#phoenix_user.id,
+                      action = Action,
+                      time = now(),
+                      clock = User#phoenix_user.clock}.
+
 create(UserName, Password) ->
     User = create_user(UserName, Password),
-    Log = #phoenix_user_log{id = ?GENERATE_TOKEN,
-                            user_id = User#phoenix_user.id,
-                            action = register,
-                            time = now(),
-                            clock = User#phoenix_user.clock},
+    UserLog = create_user_log(register, User),
+
     Fun = fun() ->
         ok = mnesia:write(phoenix_users, User, write),
-        ok = mnesia:write(phoenix_users_log, Log, write)
+        ok = mnesia:write(phoenix_users_log, UserLog, write)
     end,
     mnesia:activity(transaction, Fun),
 
     {ok, User#phoenix_user.id}.
 
 log_in(Name, Password) ->
-    Result = find_by_name(Name),
-    io:format("~p~n", [Result]),
+    Result = find_user_by(name, Name),
     case Result of
         not_found ->
             not_registered;
@@ -47,14 +50,16 @@ log_in(Name, Password) ->
             end
     end.
 
-single_answer([Result|_Rest]) -> Result;
-single_answer([]) -> not_found.
+single_answer([Result|_Rest]) ->
+    Result;
+single_answer([]) ->
+    not_found.
 
-find_by_name(Name) -> find_one_by(name, Name).
+% TODO select single value if possible
+find_user_by(Key, Value) ->
+    single_answer(find_users_by(Key, Value)).
 
-find_by_id(Id) -> find_one_by(id, Id).
-
-find_one_by(Key, Value)->
+find_users_by(Key, Value) ->
     Filter = case Key of
                  name -> #phoenix_user{_ = '_', name = Value};
                  id -> #phoenix_user{_ = '_', id = Value}
@@ -62,14 +67,14 @@ find_one_by(Key, Value)->
     Fun = fun() ->
         mnesia:match_object(phoenix_users, Filter, read)
     end,
-    single_answer(mnesia:activity(transaction, Fun)).
+    mnesia:activity(transaction, Fun).
 
 
 all() ->
     Fun = fun() ->
         Results = mnesia:match_object(phoenix_users, #phoenix_user{_ = '_'}, read),
         Logs = mnesia:match_object(phoenix_users_log, #phoenix_user_log{_ = '_'}, read),
-        {{result, Results}, {log, Logs}}
+        {{users, Results}, {logs, Logs}}
     end,
     mnesia:activity(transaction, Fun).
 
@@ -85,6 +90,7 @@ migrate(up, Nodes) ->
                          {index, [#phoenix_user_log.action]},
                          {disc_copies, Nodes}]).
 
+% TODO
 create_user(UserName, Password) ->
     UserId = ?GENERATE_TOKEN,
     PasswordHash = erlpass:hash(Password),
@@ -97,7 +103,8 @@ create_user(UserName, Password) ->
 
 create_user_test() ->
     UserName = <<"Tester">>,
-    User = create_user(UserName),
+    Password = <<"PW">>,
+    User = create_user(UserName, Password),
     ?assert(is_binary(User#phoenix_user.id)),
     ?assert(User#phoenix_user.name == UserName),
     ?assert(User#phoenix_user.clock == {1,0}).

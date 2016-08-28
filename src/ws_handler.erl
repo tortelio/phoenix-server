@@ -60,7 +60,8 @@ handle_message(get_user_data, {[{<<"id">>, Id}]}) ->
             {get_user_data, not_found};
         User ->
             Items = phoenix_item:find_by_owner(User#phoenix_user.id),
-            {get_user_data, {User, Items}}
+            ExtItems = phoenix_item:find_by_not_owner(User#phoenix_user.id),
+            {get_user_data, {User, Items, ExtItems}}
     end;
 
 % Create
@@ -81,9 +82,13 @@ handle_message(update_item, {[{<<"id">>, Id},
                                                    owner = Owner}),
     {update_item, Item};
 
-handle_message(delete_item, Id) ->
-    Id = phoenix_item:delete(Id),
+handle_message(delete_item, {[{<<"id">>, Id}, {<<"owner">>, Owner}]}) ->
+    Id = phoenix_item:delete(Id, Owner),
     {delete_item, Id};
+
+handle_message(fork_item, {[{<<"id">>, Id}, {<<"owner">>, Owner}]}) ->
+    {ok, Item, Item2} = phoenix_item:fork(Id, Owner),
+    {fork_item, Item2};
 
 % Unhandled
 handle_message(Type, Value) ->
@@ -116,10 +121,11 @@ to_ejson(X) when is_atom(X) -> X;
 to_ejson(X) -> X.
 
 %% TODO this is not a simply record
-record_to_ejson({User, Items}) when is_record(User, phoenix_user) ->
+record_to_ejson({User, Items, ExtItems}) when is_record(User, phoenix_user) ->
     {[{<<"id">>, User#phoenix_user.id},
       {<<"name">>, User#phoenix_user.name},
-      {<<"items">>, to_ejson(Items)}]};
+      {<<"items">>, to_ejson(Items)},
+      {<<"extItems">>, to_ejson(ExtItems)}]};
 record_to_ejson(User) when is_record(User, phoenix_user) ->
     {[{<<"id">>, User#phoenix_user.id},
       {<<"name">>, User#phoenix_user.name}]};
