@@ -1,27 +1,38 @@
 -module(phoenix_user).
 -include("phoenix_internal.hrl").
 
+
+-export([get_by_id/1]).
 -export([sign_up/2,
          log_in/2,
-         find_user_by/2, find_users_by/2]).
+         find_by_id/1, find_by_name/1]).
 
 -export([all/0]).
 
 -export([migrate/2]).
 
+get_by_id(UserId) ->
+    case find_by_id(UserId) of
+        [] -> throw({impossible, erlang:get_stacktrace()});
+        [User] -> User;
+        _ -> throw({impossible, erlang:get_stacktrace()})
+    end.
+
 sign_up(Name, Password) ->
-    case find_user_by(name, Name) of
-        not_found ->
+    case find_by_name(Name) of
+        [User] when is_record(User, phoenix_user) ->
+            already_registered;
+        [] ->
             {ok, _UserId} = create(Name, Password);
-        User when is_record(User, phoenix_user) ->
-            already_registered
+        Else ->
+            throw({impossible, {phoenix_user, sign_up, Else}})
     end.
 
 create_user_log(Action, User) ->
     #phoenix_user_log{id = ?GENERATE_TOKEN,
                       user_id = User#phoenix_user.id,
                       action = Action,
-                      time = now(),
+                      time = ?NOW,
                       clock = User#phoenix_user.clock}.
 
 create(UserName, Password) ->
@@ -37,46 +48,33 @@ create(UserName, Password) ->
     {ok, User#phoenix_user.id}.
 
 log_in(Name, Password) ->
-    Result = find_user_by(name, Name),
-    case Result of
-        not_found ->
-            not_registered;
-        User when is_record(User, phoenix_user)->
+    case find_by_name(Name) of
+        [User] when is_record(User, phoenix_user)->
             case erlpass:match(Password, User#phoenix_user.password) of
                 true ->
                     {ok, User#phoenix_user.id};
                 _ ->
                     bad_password
-            end
+            end;
+        [] ->
+            not_registered;
+        Else ->
+            throw({impossible, {phoenix_user, log_in, Else}})
     end.
 
-single_answer([Result|_Rest]) ->
-    Result;
-single_answer([]) ->
-    not_found.
+find_by_id(UserId) ->
+    ?TRANSACTION(mnesia:match_object(phoenix_users, ?FILTER__PH_USER__ID(UserId), read)).
 
-% TODO select single value if possible
-find_user_by(Key, Value) ->
-    single_answer(find_users_by(Key, Value)).
-
-find_users_by(Key, Value) ->
-    Filter = case Key of
-                 name -> #phoenix_user{_ = '_', name = Value};
-                 id -> #phoenix_user{_ = '_', id = Value}
-             end,
-    Fun = fun() ->
-        mnesia:match_object(phoenix_users, Filter, read)
-    end,
-    mnesia:activity(transaction, Fun).
-
+find_by_name(UserName) ->
+    ?TRANSACTION(mnesia:match_object(phoenix_users, ?FILTER__PH_USER__NAME(UserName), read)).
 
 all() ->
-    Fun = fun() ->
-        Results = mnesia:match_object(phoenix_users, #phoenix_user{_ = '_'}, read),
-        Logs = mnesia:match_object(phoenix_users_log, #phoenix_user_log{_ = '_'}, read),
-        {{users, Results}, {logs, Logs}}
-    end,
-    mnesia:activity(transaction, Fun).
+    ?TRANSACTION(
+       begin
+           Results = mnesia:match_object(phoenix_users, #phoenix_user{_ = '_'}, read),
+           Logs = mnesia:match_object(phoenix_users_log, #phoenix_user_log{_ = '_'}, read),
+           {{users, Results}, {logs, Logs}}
+       end).
 
 migrate(up, Nodes) ->
     {atomic, ok} = mnesia:create_table(phoenix_users,

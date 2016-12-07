@@ -1,18 +1,25 @@
 -module(phoenix_item).
 -include("phoenix_internal.hrl").
 
--export([create/2, find_by_id/1, find_by_owner/1, find_by_not_owner/1, get_all/0, update/1, delete/2, fork/2]).
+-export([create/2,
+         create/3]).
+-export([find_by_id/1, find_by_owner/1, find_by_not_owner/1, get_all/0, update/1, delete/2, fork/2]).
 
 -export([migrate/2]).
 
-create(Details, Owner) ->
-    User = phoenix_user:find_by_id(Owner),
+create(Title, Owner) ->
+    create(Title, Owner, undefined).
+
+create(Title, Owner, Description) ->
+    ?INFO("Create new item: Details: ~p, Owner: ~p~n", [{Title, Description}, Owner]),
+    User = phoenix_user:get_by_id(Owner),
     UserClock = itc:event(User#phoenix_user.clock),
     ItemSeed = itc:seed(),
-    Now = now(),
+    Now = ?NOW,
     ItemId = ?GENERATE_TOKEN,
     Item = #phoenix_item{id = ItemId,
-                         details = Details,
+                         title = Title,
+                         description = Description,
                          clock = ItemSeed,
                          owner = Owner},
     UpdatedUser = User#phoenix_user{clock = UserClock},
@@ -26,73 +33,68 @@ create(Details, Owner) ->
                                 action = #user_add_item{item_id = ItemId},
                                 time = Now,
                                 clock = UserClock},
-    Fun = fun() ->
-        ok = mnesia:write(phoenix_items, Item, write),
-        ok = mnesia:write(phoenix_users, UpdatedUser, write),
-        ok = mnesia:write(phoenix_items_log, ItemLog, write),
-        ok = mnesia:write(phoenix_users_log, UserLog, write)
-    end,
-    mnesia:activity(transaction, Fun),
-
-    {ok, Item}.
+    ?TRANSACTION(
+       begin
+           ok = mnesia:write(phoenix_items, Item, write),
+           ok = mnesia:write(phoenix_users, UpdatedUser, write),
+           ok = mnesia:write(phoenix_items_log, ItemLog, write),
+           ok = mnesia:write(phoenix_users_log, UserLog, write),
+           {ok, Item}
+       end).
 
 fork(ItemId, Owner) ->
+    Now = ?NOW,
     [RawItem] = find_by_id(ItemId),
 
     User2 = phoenix_user:find_by_id(Owner),
-    UpdatedUser2 = User2#phoenix_user{clock = itc:event(User2#phoenix_user.clock)},
 
     User = phoenix_user:find_by_id(RawItem#phoenix_item.owner),
-    UpdatedUser = User#phoenix_user{clock = itc:event(User#phoenix_user.clock)},
 
     {Clock1, Clock2} = itc:fork(RawItem#phoenix_item.clock),
     Item = RawItem#phoenix_item{clock = Clock1},
     ItemLog = #phoenix_item_log{id = ?GENERATE_TOKEN,
                                 item_id = ItemId,
                                 action = #item_fork{},
-                                time = now(),
+                                time = Now,
                                 clock = Item#phoenix_item.clock},
     UserLog = #phoenix_user_log{id = ?GENERATE_TOKEN,
                                  user_id = User#phoenix_user.id,
                                  action = #user_fork_item{item_id = Item#phoenix_item.id},
-                                 time = now(),
+                                 time = Now,
                                  clock = User#phoenix_user.clock},
 
     Item2 = #phoenix_item{id = ?GENERATE_TOKEN,%Item#phoenix_item.id,
-                          details = Item#phoenix_item.details,
+                          title = Item#phoenix_item.title,
                           clock = Clock2,
                           owner = Owner},
     Item2Log = #phoenix_item_log{id = ?GENERATE_TOKEN,
                                  item_id = ItemId,
                                  action = #item_create{item = Item},
-                                 time = now(),
+                                 time = Now,
                                  clock = Item2#phoenix_item.clock},
     User2Log = #phoenix_user_log{id = ?GENERATE_TOKEN,
                                  user_id = Owner,
                                  action = #user_add_item{item_id = Item2#phoenix_item.id},
-                                 time = now(),
+                                 time = Now,
                                  clock = User2#phoenix_user.clock},
-    Fun = fun() ->
-            ok = mnesia:write(phoenix_users, User, write),
-            ok = mnesia:write(phoenix_items, Item, write),
-            ok = mnesia:write(phoenix_items_log, ItemLog, write),
-            ok = mnesia:write(phoenix_users_log, UserLog, write),
-            ok = mnesia:write(phoenix_users, User2, write),
-            ok = mnesia:write(phoenix_items, Item2, write),
-            ok = mnesia:write(phoenix_items_log, Item2Log, write),
-            ok = mnesia:write(phoenix_users_log, User2Log, write)
-          end,
-    mnesia:activity(transaction, Fun),
-    {ok, Item, Item2}.
+    ?TRANSACTION(
+       begin
+           ok = mnesia:write(phoenix_users, User, write),
+           ok = mnesia:write(phoenix_items, Item, write),
+           ok = mnesia:write(phoenix_items_log, ItemLog, write),
+           ok = mnesia:write(phoenix_users_log, UserLog, write),
+           ok = mnesia:write(phoenix_users, User2, write),
+           ok = mnesia:write(phoenix_items, Item2, write),
+           ok = mnesia:write(phoenix_items_log, Item2Log, write),
+           ok = mnesia:write(phoenix_users_log, User2Log, write),
+           {ok, Item, Item2}
+       end).
 
-join(ItemId, Owner) ->
-    [RawItem] = find_by_id_and_owner(ItemId, Owner).
+%join(ItemId, Owner) ->
+%    [RawItem] = find_by_id_and_owner(ItemId, Owner).
 
 find_by() ->
     find(#phoenix_item{_ = '_'}).
-
-find_by_id_and_owner(Id, Owner) ->
-    find(#phoenix_item{id = Id, owner = Owner, _ = '_'}).
 
 find_by(owner, Owner) ->
     find(#phoenix_item{owner = Owner, _ = '_'});
@@ -107,11 +109,11 @@ find(Filter) ->
     mnesia:activity(transaction, Fun).
 
 find_by_owner(Owner) -> find_by(owner, Owner).
-find_by_not_owner(Owner) ->
+find_by_not_owner(UserId) ->
     Fun = fun() ->
-                  Constraits = fun(Item, Acc) when Item#phoenix_item.owner /=  Owner ->
+                  Constraits = fun(#phoenix_item{owner = Owner} = Item, Acc) when Owner /=  UserId ->
                                        [Item|Acc];
-                                  (Item, Acc) ->
+                                  (_Item, Acc) ->
                                        Acc
                                end,
                   mnesia:foldl(Constraits, [], phoenix_items)
@@ -128,14 +130,14 @@ update_with_log(Item, Item2) ->
     UpdatedItem = update_item(Item, Item2),
     Log = #phoenix_item_log{id = ?GENERATE_TOKEN,
                             item_id = UpdatedItem#phoenix_item.id,
-                            action = #item_update{details = UpdatedItem#phoenix_item.details},
-                            time = now(),
+                            action = #item_update{details = UpdatedItem#phoenix_item.title},
+                            time = ?NOW,
                             clock = UpdatedItem#phoenix_item.clock},
     {UpdatedItem, Log}.
 
 update_item(Item, Item2) ->
 
-    Item#phoenix_item{details = Item2#phoenix_item.details,
+    Item#phoenix_item{title = Item2#phoenix_item.title,
                       clock = itc:event(Item#phoenix_item.clock)}.
 %update_item(Item, {desciption, Description}) ->
 %    Item#phoenix_item{details = #phoenix_item_details{description = Description},
@@ -165,7 +167,7 @@ delete(ItemId, Owner) ->
                   Log = #phoenix_user_log{id = ?GENERATE_TOKEN,
                                           user_id = Item#phoenix_item.owner,
                                           action = #user_delete_item{item_id = ItemId},
-                                          time = now(),
+                                          time = ?NOW,
                                           clock = Item#phoenix_item.clock},
                   mnesia:write(phoenix_items_log, Log, write),
                   ItemId

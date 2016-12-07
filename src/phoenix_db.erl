@@ -1,9 +1,25 @@
+%%~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+%% Phoenix database
+%%~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+%%==============================================================================
+%% Definitions
+%%==============================================================================
 -module(phoenix_db).
+
+%% Includes
 -include("phoenix_internal.hrl").
 
--export([start/0, stop/0]).
+%% API
+-export([start/0,
+         stop/0]).
 -export([bootstrap/1]).
 
+%%==============================================================================
+%% Implementation
+%%==============================================================================
+%%------------------------------------------------------------------------------
+%% Public functions
+%%------------------------------------------------------------------------------
 start() ->
     case mnesia:wait_for_tables(?TABLES, ?TIMEOUT) of
         ok ->
@@ -14,7 +30,9 @@ start() ->
             {error, Results}
     end.
 
-stop() -> ok.
+% TODO
+stop() ->
+    ok.
 
 bootstrap(i_know_what_i_am_doing) ->
     mnesia:stop(),
@@ -22,6 +40,6 @@ bootstrap(i_know_what_i_am_doing) ->
     mnesia:create_schema([node()]),
     mnesia:start(),
     Fun = fun(Model) ->
-        erlang:apply(Model, migrate, [up, [node()]])
-    end,
+                  erlang:apply(Model, migrate, [up, [node()]])
+          end,
     lists:foreach(Fun, ?MODELS).

@@ -6,10 +6,14 @@
   {applications, [
     kernel,
     stdlib,
+    sasl,
     cowlib,
     ranch,
     cowboy,
     mnesia,
+    uuid,
+    jiffy,
+    erlpass,
     bcrypt
   ]},
   {mod, {phoenix_app, []}},
