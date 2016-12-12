@@ -26,8 +26,9 @@ start(_Type, _Args) ->
 
     Port = proplists:get_value(port, Config),
 
+    [net_adm:ping(Node) || Node <- proplists:get_value(nodes, Config, [])],
+
     ok = start_cowboy(Port),
-    ok = phoenix_db:start(),
 
     phoenix_sup:start_link([]).
 
@@ -43,7 +44,7 @@ stop(_State) ->
 start_cowboy(Port) when is_integer(Port) andalso Port > 0 ->
     Routes = [{"/",             cowboy_static,  {priv_file,  ?APPLICATION, "static/index.html"}},
               {"/assets/[...]", cowboy_static,  {priv_dir,   ?APPLICATION, "static/assets"}},
-              {"/websocket",    ws_handler,     [x,y]}
+              {"/websocket",    ws_handler,     []}
              ],
 
     Dispatch = cowboy_router:compile([{'_', Routes}]),

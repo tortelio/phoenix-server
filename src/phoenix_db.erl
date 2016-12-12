@@ -34,12 +34,16 @@ start() ->
 stop() ->
     ok.
 
-bootstrap(i_know_what_i_am_doing) ->
+bootstrap(i_know_what_i_am_doing_1) ->
+    Nodes = [node() | nodes()],
     mnesia:stop(),
-    mnesia:delete_schema([node()]),
-    mnesia:create_schema([node()]),
-    mnesia:start(),
+    mnesia:delete_schema(Nodes),
+    mnesia:create_schema(Nodes),
+    mnesia:start();
+
+bootstrap(i_know_what_i_am_doing_2) ->
+    Nodes = [node() | nodes()],
     Fun = fun(Model) ->
-                  erlang:apply(Model, migrate, [up, [node()]])
+                  erlang:apply(Model, migrate, [up, Nodes])
           end,
     lists:foreach(Fun, ?MODELS).

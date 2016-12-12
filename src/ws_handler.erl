@@ -5,26 +5,45 @@
 -export([websocket_handle/3, websocket_info/3]).
 -export([terminate/3]).
 
-init(Req, Opts) ->
-    {cowboy_websocket, Req, Opts}.
+-record(state, {active_user :: list()}).
 
-websocket_handle(Message, Req, State) when is_tuple(Message) ->
-    ?INFO("WS server handles message: ~p, ~p~n", [Message, State]),
+init(Req, []) ->
+    {cowboy_websocket, Req, #state{}}.
+
+websocket_handle(Message, Req, State1) when is_tuple(Message) ->
+    ?INFO("=====================================================~n"),
+    ?INFO("HANDLE MESSAGE: ~p, ~p~n", [Message, State1]),
     try
-        {Type, Value} = decode_msg(Message),
-        {ok, handle_message(Type, Value)}
+        {ok, Type, Value} = decode_msg(Message),
+        try
+            {Reply, State2} = handle_message(Type, Value, State1),
+            ?INFO("COMPOSE REPLY: ~p, ~p~n", [Type, Reply]),
+            {compose_reply(Type, Reply), State2}
+        of
+            {ComposedReply, State3} ->
+                EncodedReply = encode_msg(ComposedReply),
+                ?INFO("REPLY MESSAGE: ~p~nREPLY STATE: ~p~n", [EncodedReply, State3]),
+                ?INFO("=====================================================~n"),
+                {reply, {text, EncodedReply}, Req, State3}
+        catch
+            throw:unhandled_message ->
+                ?WARNING("Unhandled message: ~p~n", [Message]),
+                ?INFO("=====================================================~n"),
+                {stop, State1}
+        end
     of
-        {ok, Reply} -> {reply, {text, encode_msg(Reply)}, Req, State}
+        FinalReply -> FinalReply
     catch
-        throw:unhandled_message ->
-            ?WARNING("Unhandled message: ~p~n", [Message]),
-            {stop, State};
         throw:invalid_message ->
             ?WARNING("Invalid message: ~p~n", [Message]),
-            {stop, State};
+            ?INFO("=====================================================~n"),
+            {stop, State1};
+
         Class:Reason ->
-            ?WARNING("Unhandled exception: Class: ~p, Reason: ~p, Stacktrace: ~p~n", [Class, Reason, erlang:get_stacktrace()]),
-            {stop, State}
+            ?WARNING("Unhandled exception: Class: ~p, Reason: ~p, Stacktrace: ~p~n",
+                     [Class, Reason, erlang:get_stacktrace()]),
+            ?INFO("=====================================================~n"),
+            {stop, State1}
     end;
 
 websocket_handle(Data, Req, State) ->
@@ -42,43 +61,43 @@ terminate(_Reason, _Req, _State) ->
 %% USERS
 %%==============================================================================
 
-% Login
+%% User sign up ----------------------------------------------------------------
 
-%% now this login will register if does not exist
-handle_message(sign_up, #{<<"name">> := Name, <<"password">> := Password}) ->
-    case phoenix_user:sign_up(Name, Password) of
-        already_registered ->
-            {sign_up, already_registered};
-        {ok, UserId} ->
-            {sign_up, UserId}
-    end;
+handle_message(sign_up, #{<<"name">> := Name, <<"password">> := Password}, State) ->
+    ok = phoenix_user:sign_up(Name, Password),
+    {ok, State};
 
-%% case should use for logging
-handle_message(log_in, #{<<"name">> := Name, <<"password">> := Password}) ->
+%% User log in -----------------------------------------------------------------
+
+handle_message(log_in, #{<<"name">> := Name, <<"password">> := Password}, State) ->
     case phoenix_user:log_in(Name, Password) of
         {ok, UserId} ->
-            {log_in, UserId};
-        Error ->
-            {log_in, Error}
+            {{ok, UserId}, State#state{active_user = UserId}};
+        {error, Reason} ->
+            {{error, Reason}, State}
     end;
 
-handle_message(log_in, #{<<"user_id">> := Id}) ->
-    case phoenix_user:find_by_id(Id) of
-        [] ->
-            {login, not_registered};
-        [User] ->
-            {login, User}
-    end;
+%% User log out ----------------------------------------------------------------
 
-% Get all
-handle_message(get_user_data, #{<<"user_id">> := Id}) ->
-    case phoenix_user:find_by_id(Id) of
-        [] ->
-            {get_user_data, not_found};
-        [User] ->
-            Items = phoenix_item:find_by_owner(User#phoenix_user.id),
-            ExtItems = phoenix_item:find_by_not_owner(User#phoenix_user.id),
-            {get_user_data, {User, Items, ExtItems}}
+handle_message(log_out, #{<<"user_id">> := UserId}, #state{active_user = UserId} = State) ->
+    {ok, State#state{active_user = undefined}};
+
+handle_message(log_out, #{<<"user_id">> := _UserId}, #state{active_user = _ActiveUserId} = State) ->
+    {{error, non_active_user}, State};
+
+%% Get all data ----------------------------------------------------------------
+
+%% Log in again, without direct log in.
+handle_message(get_user_data, #{<<"user_id">> := Id} = Value, #state{active_user = undefined} = State) ->
+    handle_message(get_user_data, Value, State#state{active_user = Id});
+handle_message(get_user_data, #{<<"user_id">> := Id}, State) ->
+    case phoenix_user:get_by_id(Id) of
+        undefined ->
+            {{error, not_found}, State};
+        User ->
+            Items = db_phoenix_item:find_by_owner(User#phoenix_user.id),
+            ExtItems = db_phoenix_item:find_by_not_owner(User#phoenix_user.id),
+            {{ok, User, Items, ExtItems}, State}
     end;
 
 %%==============================================================================
@@ -86,93 +105,78 @@ handle_message(get_user_data, #{<<"user_id">> := Id}) ->
 %%==============================================================================
 
 % Create
-handle_message(add_item, #{<<"user_id">> := UserId,
-                           <<"item">> := #{<<"title">> := Title}}) ->
+handle_message(add_item, #{<<"owner">> := UserId,
+                           <<"title">> := Title}, State) ->
 
     {ok, Item} = phoenix_item:create(Title, UserId),
-    {add_item, Item};
+    {{ok, Item}, State};
 
-%handle_message(update_item, {[{<<"id">>, Id},
-%                              {<<"details">>, {[{<<"description">>, Description},
-%                                                {<<"done">>, Done}]}},
-%                              {<<"owner">>, Owner}]}) ->
-%    {ok, Item} = phoenix_item:update(#phoenix_item{id = Id,
-%                                                   details = #phoenix_item_details{description = Description,
-%                                                                                   done = Done},
-%                                                   owner = Owner}),
-%    {update_item, Item};
-%
-%handle_message(delete_item, {[{<<"id">>, Id}, {<<"owner">>, Owner}]}) ->
-%    Id = phoenix_item:delete(Id, Owner),
-%    {delete_item, Id};
-%
-%handle_message(fork_item, {[{<<"id">>, Id}, {<<"owner">>, Owner}]}) ->
-%    {ok, _Item, Item2} = phoenix_item:fork(Id, Owner),
-%    {fork_item, Item2};
+handle_message(update_item, #{<<"item_id">> := ItemId,
+                              <<"title">> := Title,
+                              <<"done">> := Done}, State) ->
+    ok = phoenix_item:update(ItemId, Title, Done),
+    {ok, State};
+
+handle_message(finish_item, #{<<"item_id">> := ItemId}, State) ->
+    ok = phoenix_item:finish(ItemId),
+    {ok, State};
+
+handle_message(delete_item, #{<<"item_id">> := ItemId}, State) ->
+    ok = phoenix_item:delete(ItemId),
+    {ok, State};
+
+handle_message(fork_item, #{<<"item_id">> := ItemId}, #state{active_user = ActiveUserId} = State) ->
+    ok = phoenix_item:fork(ItemId, ActiveUserId),
+
+    {ok, State};
 
 %%==============================================================================
 %% OTHER
 %%==============================================================================
 
 % Unhandled
-handle_message(_Type, _Value) -> throw(unhandled_message).
+handle_message(_Type, _Value, _State) -> throw(unhandled_message).
 
 
 %%==============================================================================
 % private
 %%==============================================================================
 
+%% Decode WS message -----------------------------------------------------------
 decode_msg({_, Msg}) ->
     case jiffy:decode(Msg, [return_maps]) of
         #{<<"type">> := Type, <<"value">> := Value} = X->
             ?INFO("Decoded msg: ~p~n", [X]),
-            {?B2A(Type), Value};
+            {ok, ?B2A(Type), Value};
         DecodedMsg ->
             throw({invalid_message, DecodedMsg})
     end.
 
+%% Compose reply ---------------------------------------------------------------
+
+compose_reply(sign_up, ok) ->
+    sign_up;
+compose_reply(log_in, {ok, UserId}) ->
+    {log_in, ?COMPOSE_STRING(UserId)};
+compose_reply(log_in, {error, Reason}) ->
+    {log_in, Reason};
+compose_reply(log_out, ok) ->
+    log_out;
+compose_reply(get_user_data, {ok, User, Items, ExtItems}) ->
+    {get_user_data, ?COMPOSE_USER_DATA(User, Items, ExtItems)};
+compose_reply(add_item, {ok, Item}) ->
+    {add_item, ?COMPOSE_ITEM(Item)};
+compose_reply(update_item, ok) ->
+    update_item;
+compose_reply(delete_item, ok) ->
+    delete_item;
+compose_reply(fork_item, ok) ->
+    fork_item.
+
+%% Encode reply to WS message --------------------------------------------------
+
 encode_msg({Type, Value}) ->
-    jiffy:encode(#{type => Type, value => to_ejson(Value)}]});
+    ?INFO("Encode value: ~p~n", [Value]),
+    jiffy:encode(#{type => Type, value => Value});
 encode_msg(Type) ->
     jiffy:encode(#{type => Type}).
-
-to_ejson([X]) -> [to_ejson(X)];
-to_ejson([X|T]) -> [to_ejson(X)|to_ejson(T)];
-%% TODO tuple -> record. is not correct
-to_ejson(X) when is_tuple(X) -> record_to_ejson(X);
-%% TODO
-to_ejson(X) when is_atom(X) -> X;
-to_ejson(X) -> X.
-
-%% TODO this is not a simply record
-record_to_ejson({User, Items, ExtItems}) when is_record(User, phoenix_user) ->
-    {[{<<"id">>, User#phoenix_user.id},
-      {<<"name">>, User#phoenix_user.name},
-      {<<"items">>, to_ejson(Items)},
-      {<<"ext_items">>, to_ejson(ExtItems)}]};
-record_to_ejson(User) when is_record(User, phoenix_user) ->
-    {[{<<"id">>, User#phoenix_user.id},
-      {<<"name">>, User#phoenix_user.name}]};
-record_to_ejson(Item) when is_record(Item, phoenix_item) ->
-    {[{<<"id">>, Item#phoenix_item.id},
-      {<<"title">>, to_ejson(Item#phoenix_item.title)},
-      {<<"owner">>, Item#phoenix_item.owner}]};
-record_to_ejson(Details) when is_record(Details, phoenix_item_details) ->
-    {[{<<"description">>, Details#phoenix_item_details.description},
-      {<<"done">>, Details#phoenix_item_details.done}]}.
-
-
-%%------------------------------------
-%%               Test
-%%------------------------------------
-
--ifdef(EUNIT).
-
-to_json_test() ->
-    ?assert(to_ejson([]) == []),
-    ?assert(to_ejson([atom]) == [atom]),
-    Id = ?GENERATE_TOKEN,
-    User = #phoenix_user{name = "Sample", id = Id},
-    ?assert(to_ejson(User) == {[{<<"id">>, Id}, {<<"name">>, "Sample"}]}).
-
--endif.
